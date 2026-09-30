@@ -1,0 +1,5 @@
+checkpoints/final_models/
+checkpoints/sac_intermediate/
+checkpoints/sac_waveshare/
+runs/
+data/

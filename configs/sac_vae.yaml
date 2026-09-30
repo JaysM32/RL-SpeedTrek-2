@@ -1,0 +1,43 @@
+# Config for SAC-in-VAE-latent-space training.
+# Copy this file if you want to keep multiple experiment configs around.
+
+env:
+  sim_path: "/Users/jaysm/Desktop/donkey_sim.app/Contents/MacOS/donkey_sim"     # path to the Unity simulator executable
+  env_id: "donkey-waveshare-v0"  # see gym-donkeycar for other track ids
+  host: "127.0.0.1"
+  port: 9091
+  image_size: [80, 160, 3]             # [H, W, C] after resize, before VAE encoding
+  frame_skip: 2
+  max_episode_steps: 2000
+
+vae:
+  latent_dim: 32
+  checkpoint: "checkpoints/vae.pt"
+
+reward:
+  mode: "fast"                         # "safe" (phase 1: finish laps, speed doesn't matter) or
+                                        # "fast" (phase 2: optimize for lap time) -- see utils/reward.py
+  progress_weight: 1.0
+  cross_track_weight: -1.0
+  crash_penalty: -10.0
+  min_speed_penalty: -0.5              # discourage the "drive slowly to avoid risk" degenerate policy ("safe" mode only)
+  max_cte: 1.5                         # loosened from the code default (4.0) so minor wobbles don't end the episode
+  safe_speed_cap: 1.0                  # "safe" mode only: progress reward caps out at this speed
+  lap_complete_bonus: 20.0             # flat bonus for finishing a lap, in either mode
+  lap_time_bonus_scale: 200.0          # "fast" mode only: bonus = this / last_lap_time (faster lap = bigger bonus)
+
+sac:
+  total_timesteps: 200000
+  learning_rate: 0.0003
+  buffer_size: 100000
+  batch_size: 256
+  gamma: 0.99
+  tau: 0.005
+  train_freq: 1
+  gradient_steps: 2
+  learning_starts: 1000
+  policy_kwargs:
+    net_arch: [64, 64]
+  tensorboard_log: "runs/sac_vae"
+  checkpoint_out: "checkpoints/sac_donkey.zip"
+  save_every_steps: 2500

@@ -1,0 +1,12 @@
+torch>=2.0
+torchvision>=0.15
+stable-baselines3>=2.2
+gymnasium>=0.29
+numpy>=1.24
+opencv-python>=4.8
+pyyaml>=6.0
+tensorboard>=2.14
+Pillow>=10.0
+matplotlib>=3.7
+# gym-donkeycar: pip install from source (see README) if the PyPI release lags
+gym-donkeycar>=1.3
