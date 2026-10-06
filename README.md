@@ -1,4 +1,4 @@
-# DonkeyCar RL Scaffold (→ JetRacer)
+# DonkeyCar RL Simulation
 
 Starter code for training an RL driving agent in the `gym-donkeycar` simulator, structured
 so the trained policy is a good fit for later deployment on a JetRacer AI Kit car.
@@ -50,8 +50,6 @@ opens and the car moves (even badly), the env wiring is correct.
 python -m vae.collect_frames --sim-path "/Users/jaysm/Desktop/donkey_sim.app/Contents/MacOS/donkey_sim" --out data/frames --n-frames 5000 --env-id donkey-circuit-launch-track-v0
 
 
-
-
 ```bash
 python -m vae.collect_frames --sim-path /path/to/donkey_sim --out data/frames --n-frames 5000
 python -m vae.train_vae --data data/frames --out checkpoints/vae.pt --latent-dim 32
@@ -69,7 +67,7 @@ python -m agents.train_sac \
     --config configs/sac_vae.yaml
 ```
 
-## train from checkpoint
+## 5.1 train from checkpoint
 
 python -m agents.train_sac \
     --sim-path "/Users/jaysm/Desktop/donkey_sim.app/Contents/MacOS/donkey_sim" \
@@ -79,7 +77,7 @@ python -m agents.train_sac \
 
 TensorBoard logs go to `runs/`; `tensorboard --logdir runs` to watch reward curves live.
 
-## check transitions (states, actions, rewards)
+## 5.2 check transitions (states, actions, rewards)
 
 python -m scripts.inspect_transitions --sim-path "/Users/jaysm/Desktop/donkey_sim.app/Contents/MacOS/donkey_sim" --vae-checkpoint checkpoints/vae.pt --steps 300
 
@@ -96,7 +94,6 @@ python -m agents.train_ppo_baseline --sim-path /path/to/donkey_sim
 python -m scripts.evaluate --sim-path /path/to/donkey_sim --model checkpoints/sac_donkey.zip \
     --vae-checkpoint checkpoints/vae.pt --episodes 10
 ```
-
 
 python -m scripts.time_trial --sim-path "/Users/jaysm/Desktop/donkey_sim.app/Contents/MacOS/donkey_sim" --model checkpoints/sac_donkey.zip --vae-checkpoint checkpoints/vae.pt --laps 3 --attempts 5
 
