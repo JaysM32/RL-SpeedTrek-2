@@ -10,6 +10,14 @@ Usage:
     # smooth a noisy curve with a rolling average over 20 data points:
     python -m scripts.plot_learning_curve --logdir runs/sac_vae --smooth 20
 
+    # mark where a curriculum phase changed with a dotted vertical line + label:
+    python -m scripts.plot_learning_curve --logdir runs/sac_vae --smooth 20 \
+        --vline 150000 --vline-label "safe -> fast"
+
+    # several markers at once (labels are matched to --vline by position):
+    python -m scripts.plot_learning_curve --logdir runs/sac_vae \
+        --vline 150000 300000 --vline-label "safe -> fast" "waveshare switch"
+
     # see every tag that's actually been logged, if you're not sure what to plot:
     python -m scripts.plot_learning_curve --logdir runs/sac_vae --list-tags
 
@@ -91,7 +99,17 @@ def main():
                          help="rolling-average window in data points; 1 = no smoothing")
     parser.add_argument("--list-tags", action="store_true",
                          help="print every scalar tag found under --logdir and exit, instead of plotting")
+    parser.add_argument("--vline", type=float, nargs="+", default=[],
+                         help="training timestep(s) to mark with a vertical dotted line, e.g. "
+                              "where a curriculum phase (safe -> fast) or a config change happened")
+    parser.add_argument("--vline-label", nargs="+", default=[],
+                         help="label(s) for --vline, matched by position; fine to give fewer "
+                              "labels than --vline values, the rest are left unlabeled")
     args = parser.parse_args()
+
+    if len(args.vline_label) > len(args.vline):
+        raise SystemExit("--vline-label has more entries than --vline -- give one label per "
+                          "line at most, matched by position")
 
     event_files = _find_event_files(args.logdir)
     if not event_files:
@@ -107,7 +125,7 @@ def main():
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
 
     fig, ax = plt.subplots(figsize=(9, 5))
-    any_plotted = False
+    plotted_tags = []  # tags that actually had data -- may be fewer than args.tags requested
     for tag in args.tags:
         steps, values = _load_tag(event_files, tag)
         if not steps:
@@ -115,15 +133,28 @@ def main():
                   f"(run with --list-tags to see what IS available)")
             continue
         ax.plot(steps, _smooth(values, args.smooth), label=tag)
-        any_plotted = True
+        plotted_tags.append(tag)
 
-    if not any_plotted:
+    if not plotted_tags:
         raise SystemExit("none of the requested tags were found -- run with --list-tags to see "
                           "what's actually logged under this logdir")
 
+    for i, x in enumerate(args.vline):
+        label = args.vline_label[i] if i < len(args.vline_label) else None
+        ax.axvline(x=x, color="gray", linestyle=":", linewidth=1.5,
+                   label=label, zorder=0)
+        if label:
+            ax.text(x, 0.97, f" {label}", rotation=90, va="top", ha="left",
+                    fontsize=8, color="dimgray", transform=ax.get_xaxis_transform(),
+                    clip_on=False)
+
+    # Title (and y-axis label, when there's only one series) say which tag(s) produced this
+    # chart -- "Training curve" alone was ambiguous once you're comparing several PNGs side by
+    # side in a report and can't tell rollout/ep_rew_mean from rollout/ep_len_mean at a glance.
+    tag_summary = ", ".join(plotted_tags)
     ax.set_xlabel("training timestep")
-    ax.set_ylabel("value")
-    ax.set_title("Training curve")
+    ax.set_ylabel(plotted_tags[0] if len(plotted_tags) == 1 else "value")
+    ax.set_title(f"Training curve: {tag_summary}")
     ax.legend()
     ax.grid(alpha=0.3)
     fig.tight_layout()
