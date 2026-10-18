@@ -13,6 +13,7 @@ version differs enough to break this, the fix is almost always in these two help
 """
 
 import argparse
+import math
 import uuid
 
 import cv2
@@ -38,6 +39,14 @@ def _compat_step(env, action):
         return result
     obs, reward, done, info = result
     return obs, reward, done, False, info
+
+
+def _ground_dist(pos_a, pos_b) -> float:
+    """Distance in the ground plane only. gym-donkeycar's Unity scenes are Y-up, so "ground
+    plane" means X/Z -- Y is height. Same helper as scripts/time_trial.py's _ground_dist,
+    duplicated rather than imported so envs/ doesn't depend on scripts/ -- keep the two in
+    sync if either changes."""
+    return math.hypot(pos_a[0] - pos_b[0], pos_a[2] - pos_b[2])
 
 
 def _make_sim_conf(sim_path: str, host: str, port: int, frame_skip: int = 1, cam_resolution=(80, 160, 3),
@@ -71,28 +80,92 @@ def _make_sim_conf(sim_path: str, host: str, port: int, frame_skip: int = 1, cam
 
 class RewardShapingWrapper(RewardWrapper):
     """Replaces the sim's default reward with utils.reward.compute_reward, and ends the
-    episode on crash/off-track (gym-donkeycar's own `done` signal is sometimes lenient)."""
+    episode on crash/off-track (gym-donkeycar's own `done` signal is sometimes lenient).
+
+    LAP DETECTION: this does NOT use gym-donkeycar's own info["lap_count"]/info["last_lap_time"]
+    -- the exact same reason scripts/time_trial.py doesn't: on the waveshare track, the sim's
+    own lap counter only fires on `on_collision_with_starting_line`, and only counts a crossing
+    that matches the exact `starting_line_index` recorded on the very first crossing (see
+    gym_donkeycar/envs/donkey_sim.py). That index isn't exposed to Python, and on this track
+    most real crossings don't match it, so `info["lap_count"]` silently undercounts -- which
+    meant the "fast" mode's lap-time reward bonus below was rarely firing during training at
+    all, not just being occasionally wrong.
+
+    Instead, lap boundaries are detected the same way time_trial.py does it: once the car has
+    moved at least `reward_cfg.lap_departure_m` away from its reset() position (so it's
+    genuinely left, not idling near the line), the next time it comes back within
+    `reward_cfg.lap_return_m` of that position counts as one lap. Lap "time" is measured in
+    STEPS, not wall-clock seconds -- training-loop overhead (gradient updates, inference
+    latency between env.step() calls) would otherwise leak into a wall-clock measurement and
+    reward the agent for things that have nothing to do with how it drove. See
+    RewardConfig.lap_steps_bonus_scale's docstring for the same point from the reward side.
+
+    The reliable lap count/last-lap-step-count are surfaced as info["lap_count_reliable"] and
+    info["last_lap_steps"] -- utils/callbacks.py's EpisodeStatsCallback reads those, not the
+    sim's own (unreliable) info["lap_count"]/info["last_lap_time"], which are left untouched
+    in `info` for comparison/debugging if you want to look at them.
+    """
 
     def __init__(self, env, reward_cfg: RewardConfig | None = None):
         super().__init__(env)
         self.reward_cfg = reward_cfg or RewardConfig()
         self._last_info = {}
-        self._last_lap_count = 0
+        self._start_pos = None
+        self._armed = False
+        self._steps_since_boundary = 0
+        self._lap_count_reliable = 0
+        self._last_lap_steps = 0
 
     def step(self, action):
         obs, _, terminated, truncated, info = _compat_step(self.env, action)
         self._last_info = info
 
-        lap_count = info.get("lap_count", 0)
-        just_completed_lap = lap_count > self._last_lap_count
-        self._last_lap_count = lap_count
+        cte = float(info.get("cte", 0.0))
+        hit = info.get("hit", "none")
+        # Needed up front: a crash can coincide with the car being back near the start point
+        # (plausible -- that's on the track too), and that must not get credited as a
+        # completed lap. Same ordering bug class already found and fixed in
+        # scripts/time_trial.py's _drive_to_next_lap_boundary().
+        will_crash = (hit != "none") or (abs(cte) > self.reward_cfg.max_cte)
 
-        reward, crashed = compute_reward(info, self.reward_cfg, just_completed_lap)
+        just_completed_lap = False
+        lap_steps = None
+        pos = info.get("pos")
+        if pos is not None:
+            if self._start_pos is None:
+                # Shouldn't normally happen (reset() always sets this first), but don't crash
+                # training over a missing position on some weird first frame -- just arm from
+                # here instead of lap-detecting against nothing.
+                self._start_pos = pos
+            self._steps_since_boundary += 1
+            dist_to_start = _ground_dist(pos, self._start_pos)
+            if not self._armed:
+                if dist_to_start > self.reward_cfg.lap_departure_m:
+                    self._armed = True
+            elif dist_to_start < self.reward_cfg.lap_return_m and not will_crash:
+                just_completed_lap = True
+                lap_steps = self._steps_since_boundary
+                self._lap_count_reliable += 1
+                self._last_lap_steps = lap_steps
+                self._armed = False
+                self._steps_since_boundary = 0
+
+        info["lap_count_reliable"] = self._lap_count_reliable
+        info["last_lap_steps"] = self._last_lap_steps
+
+        reward, crashed = compute_reward(info, self.reward_cfg, just_completed_lap, lap_steps)
         return obs, reward, terminated or crashed, truncated, info
 
     def reset(self, **kwargs):
-        self._last_lap_count = 0
-        return _compat_reset(self.env, **kwargs)
+        obs, info = _compat_reset(self.env, **kwargs)
+        self._start_pos = info.get("pos")
+        self._armed = False
+        self._steps_since_boundary = 0
+        self._lap_count_reliable = 0
+        self._last_lap_steps = 0
+        info["lap_count_reliable"] = 0
+        info["last_lap_steps"] = 0
+        return obs, info
 
     def reward(self, reward):  # required by RewardWrapper's abstract interface; unused
         return reward

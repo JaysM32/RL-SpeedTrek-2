@@ -1,4 +1,7 @@
-# Config for SAC-in-VAE-latent-space training.
+# Config for SAC-in-VAE-latent-space training, and the PPO-on-raw-pixels comparison baseline.
+# env: and reward: are shared by both algorithms -- edit them once and both train.py scripts
+# pick up the same track, reward curriculum, and crash threshold. sac: and ppo: hold each
+# algorithm's own hyperparameters and output paths.
 # Copy this file if you want to keep multiple experiment configs around.
 
 env:
@@ -24,10 +27,13 @@ reward:
   max_cte: 1.5                         # loosened from the code default (4.0) so minor wobbles don't end the episode
   safe_speed_cap: 1.0                  # "safe" mode only: progress reward caps out at this speed
   lap_complete_bonus: 20.0             # flat bonus for finishing a lap, in either mode
-  lap_time_bonus_scale: 200.0          # "fast" mode only: bonus = this / last_lap_time (faster lap = bigger bonus)
+  lap_steps_bonus_scale: 5000.0        # "fast" mode only: bonus = this / lap_steps (fewer steps/lap = bigger bonus)
+  lap_departure_m: 2.0                 # how far (meters) the car must get from its reset() position before
+                                        # a return counts as a lap -- see envs/donkey_env.py's RewardShapingWrapper
+  lap_return_m: 0.1                    # how close (meters) it must come back to count as completing that lap
 
 sac:
-  total_timesteps: 200000
+  total_timesteps: 100000
   learning_rate: 0.0003
   buffer_size: 100000
   batch_size: 256
@@ -40,4 +46,17 @@ sac:
     net_arch: [64, 64]
   tensorboard_log: "runs/sac_vae"
   checkpoint_out: "checkpoints/sac_donkey.zip"
+  save_every_steps: 2500
+
+ppo:
+  # total_timesteps matches sac.total_timesteps on purpose -- same number of environment
+  # steps for both, so a reward-vs-timesteps comparison in your report isn't confounded by
+  # one algorithm simply having trained longer than the other.
+  total_timesteps: 150000
+  learning_rate: 0.0003
+  n_steps: 2048
+  batch_size: 64
+  gamma: 0.99
+  tensorboard_log: "runs/ppo_baseline"
+  checkpoint_out: "checkpoints/ppo_donkey.zip"
   save_every_steps: 2500
