@@ -33,7 +33,7 @@ reward:
   lap_return_m: 0.1                    # how close (meters) it must come back to count as completing that lap
 
 sac:
-  total_timesteps: 100000
+  total_timesteps: 50000
   learning_rate: 0.0003
   buffer_size: 100000
   batch_size: 256
