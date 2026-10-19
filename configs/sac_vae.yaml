@@ -52,7 +52,7 @@ ppo:
   # total_timesteps matches sac.total_timesteps on purpose -- same number of environment
   # steps for both, so a reward-vs-timesteps comparison in your report isn't confounded by
   # one algorithm simply having trained longer than the other.
-  total_timesteps: 150000
+  total_timesteps: 100000
   learning_rate: 0.0003
   n_steps: 2048
   batch_size: 64

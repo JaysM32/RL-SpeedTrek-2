@@ -1,5 +1,4 @@
-checkpoints/final_models/
+checkpoints/ppo_waveshare
 checkpoints/sac_intermediate/
 checkpoints/sac_waveshare/
-runs/
 data/

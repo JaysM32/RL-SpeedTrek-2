@@ -1,5 +1,7 @@
 """SB3 callbacks used by the training scripts."""
 
+from collections import deque
+
 from stable_baselines3.common.callbacks import BaseCallback, CheckpointCallback
 
 
@@ -64,5 +66,67 @@ class EpisodeStatsCallback(BaseCallback):
                 # starting back at lap_count_reliable 0, so reset our tracking now rather than
                 # comparing the new episode's first lap against the old episode's final count.
                 self._last_lap_count[i] = 0
+
+        return True
+
+
+class BestModelCallback(BaseCallback):
+    """Saves the model to `save_path` whenever a rolling mean of recent episode rewards
+    improves on the best seen so far during THIS training invocation.
+
+    This is a deliberately lighter-weight stand-in for SB3's own EvalCallback. A real
+    EvalCallback needs a second, separate environment for periodic deterministic evaluation
+    episodes -- for gym-donkeycar that means a second live Unity simulator process, which
+    isn't practical when you've only got one donkey_sim.app instance (and one GPU/CPU budget)
+    on your machine. This callback costs nothing extra: it just watches the SAME episode
+    rewards the training env is already producing (via SB3's Monitor wrapper, the same
+    info["episode"]["r"] EpisodeStatsCallback logs), smoothed over a rolling window so one
+    lucky/unlucky episode doesn't trigger a save. The tradeoff is that "best" is judged on the
+    (stochastic) training policy's own episodes rather than clean deterministic eval runs --
+    good enough to avoid walking away with a final checkpoint that's worse than one you drove
+    through earlier, which is the actual problem this solves.
+
+    IMPORTANT: "best" is only meaningful WITHIN one invocation / one reward mode. Safe-mode
+    and fast-mode rewards are on different scales (fast adds an unbounded speed term and a
+    lap-steps bonus) -- but since this callback's _best_mean_reward always starts at -inf
+    fresh at the start of each training invocation, a safe-mode run's "best" and a later
+    fast-mode run's "best" are never compared against each other; just don't eyeball the two
+    numbers side by side and read anything into which is bigger.
+
+    Does NOT help a run that already finished before this callback existed -- for that, see
+    scripts/pick_best_checkpoint.py, which re-evaluates the periodic checkpoints
+    CheckpointCallback already saved during that run.
+    """
+
+    def __init__(self, save_path: str, window_size: int = 20, min_episodes: int = 5, verbose: int = 0):
+        super().__init__(verbose)
+        self.save_path = save_path
+        self.window_size = window_size
+        self.min_episodes = min_episodes
+        self._rewards: dict[int, deque] = {}
+        self._best_mean_reward = -float("inf")
+
+    def _on_step(self) -> bool:
+        for i, info in enumerate(self.locals.get("infos", [])):
+            ep_info = info.get("episode")
+            if ep_info is None:
+                continue
+            if i not in self._rewards:
+                self._rewards[i] = deque(maxlen=self.window_size)
+            self._rewards[i].append(ep_info["r"])
+
+        all_recent = [r for buf in self._rewards.values() for r in buf]
+        if len(all_recent) < self.min_episodes:
+            return True
+
+        mean_reward = sum(all_recent) / len(all_recent)
+        if mean_reward > self._best_mean_reward:
+            self._best_mean_reward = mean_reward
+            self.model.save(self.save_path)
+            self.logger.record("rollout/best_mean_ep_rew", mean_reward)
+            if self.verbose:
+                print(f"[BestModelCallback] new best rolling mean reward {mean_reward:.2f} "
+                      f"(over last {len(all_recent)} episode(s)) -- saved to {self.save_path}",
+                      flush=True)
 
         return True

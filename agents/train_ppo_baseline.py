@@ -15,7 +15,8 @@ Usage:
     # to resume the most recent checkpoint instead of starting over:
     python -m agents.train_ppo_baseline --sim-path /path/to/donkey_sim \
         --config configs/sac_vae.yaml --resume auto
-
+        
+        python -m agents.train_ppo_baseline --sim-path "/Users/jaysm/Desktop/donkey_sim.app/Contents/MacOS/donkey_sim" --config configs/sac_vae.yaml --resume auto
 IMPORTANT: by default this always starts a brand-new model from scratch, even if
 checkpoints already exist in checkpoints/ppo_waveshare/ -- it does not auto-resume.
 Pass --resume auto (pick up the latest checkpoint) or --resume <path-to-checkpoint.zip>
@@ -32,7 +33,7 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.monitor import Monitor
 
 from envs.donkey_env import make_raw_donkey_env
-from utils.callbacks import EpisodeStatsCallback, make_checkpoint_callback
+from utils.callbacks import BestModelCallback, EpisodeStatsCallback, make_checkpoint_callback
 from utils.reward import RewardConfig
 
 
@@ -61,6 +62,16 @@ def main():
         default=None,
         help="'auto' to resume the latest checkpoint in checkpoints/ppo_waveshare/, "
         "or a specific checkpoint .zip path. Omit to always start fresh (the old default behavior).",
+    )
+    parser.add_argument(
+        "--best-window", type=int, default=20,
+        help="rolling number of completed episodes BestModelCallback averages over before "
+             "deciding whether this is a new best (see utils/callbacks.py)",
+    )
+    parser.add_argument(
+        "--best-min-episodes", type=int, default=5,
+        help="don't save a 'best' checkpoint until at least this many episodes have completed "
+             "-- avoids saving on one lucky early episode before the mean has settled",
     )
     args = parser.parse_args()
 
@@ -122,17 +133,38 @@ def main():
     )
     stats_cb = EpisodeStatsCallback()
 
+    # Named by reward_cfg.mode (not just "best_model.zip") so a safe-mode run and a later
+    # fast-mode run don't overwrite each other's best checkpoint -- their rewards are on
+    # different scales anyway (see BestModelCallback's docstring), so keeping them as
+    # separate files is also what makes it obvious which "best" came from which phase.
+    best_model_path = os.path.join(checkpoint_dir, f"best_model_{reward_cfg.mode}.zip")
+    best_cb = BestModelCallback(
+        save_path=best_model_path,
+        window_size=args.best_window,
+        min_episodes=args.best_min_episodes,
+        verbose=1,
+    )
+
     # reset_num_timesteps=False is what makes a resumed run keep counting from where the
     # loaded checkpoint left off, instead of resetting the step counter (and PPO's own
     # rollout-collection bookkeeping) back to zero -- identical to train_sac.py.
     model.learn(
         total_timesteps=ppo_cfg["total_timesteps"],
-        callback=[checkpoint_cb, stats_cb],
+        callback=[checkpoint_cb, stats_cb, best_cb],
         reset_num_timesteps=(resume_path is None),
     )
 
     model.save(ppo_cfg["checkpoint_out"])
     print(f"saved final model to {ppo_cfg['checkpoint_out']}")
+    if os.path.exists(best_model_path):
+        print(f"best model seen during THIS run (by rolling mean episode reward) saved to {best_model_path}")
+        print("note: the final model above is not necessarily the best one -- compare the two "
+              "(e.g. with scripts/time_trial.py) before picking which to carry into the next phase.")
+    else:
+        print(f"no 'best' checkpoint was saved to {best_model_path} -- fewer than "
+              f"--best-min-episodes ({args.best_min_episodes}) full episodes completed during "
+              f"this run, so there wasn't enough data for a rolling mean. The final model above "
+              f"is all you have from this run.")
     env.close()
 
 
