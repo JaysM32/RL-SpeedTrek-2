@@ -1,19 +1,24 @@
 """Time a trained policy over exactly N laps (default 3) in one continuous run, and report the
 total time -- directly comparable to a human's stopwatch time over the same number of laps.
 
-Usage:
-    python -m scripts.time_trial --sim-path /path/to/donkey_sim --model checkpoints/sac_donkey.zip \
-        --vae-checkpoint checkpoints/vae.pt --laps 3
+Works for both SAC (VAE latent observations) and PPO (raw pixel observations) -- pass --algo
+to pick. Defaults to --algo sac to match this script's original behavior, so existing SAC
+commands keep working unchanged.
+
+Usage (SAC):
+    python -m scripts.time_trial --sim-path "/Users/jaysm/Desktop/donkey_sim.app/Contents/MacOS/donkey_sim" --algo sac --model checkpoints/final_models/sac_donkey_250000_steps --vae-checkpoint checkpoints/vae.pt --laps 3 --attempts 5
+
+Usage (PPO -- no --vae-checkpoint, it doesn't use one):
+    python -m scripts.time_trial --sim-path "/Users/jaysm/Desktop/donkey_sim.app/Contents/MacOS/donkey_sim" --algo ppo \
+        --model checkpoints/final_models/ppo_best_model_fast --laps 3 --attempts 5
 
     # run several attempts and report best + mean, since one attempt can get unlucky:
-    python -m scripts.time_trial --sim-path "/Users/jaysm/Desktop/donkey_sim.app/Contents/MacOS/donkey_sim" --model checkpoints/sac_waveshare/sac_donkey_200000_steps.zip --vae-checkpoint checkpoints/vae.pt --laps 3 --attempts 5
+    python -m scripts.time_trial --sim-path /path/to/donkey_sim --algo ppo \
+        --model checkpoints/ppo_donkey.zip --laps 3 --attempts 5
 
     # skip the out/cooldown laps for a quicker sanity-check run:
-    python -m scripts.time_trial --sim-path /path/to/donkey_sim --model checkpoints/sac_donkey.zip \
-        --vae-checkpoint checkpoints/vae.pt --no-out-lap --no-cooldown-lap
-        
-        
-    python -m scripts.time_trial --sim-path "/Users/jaysm/Desktop/donkey_sim.app/Contents/MacOS/donkey_sim" --model checkpoints/sac_waveshare/sac_donkey_200000_steps.zip --vae-checkpoint checkpoints/vae.pt --laps 3
+    python -m scripts.time_trial --sim-path /path/to/donkey_sim --algo ppo \
+        --model checkpoints/ppo_donkey.zip --no-out-lap --no-cooldown-lap
 
 By default this drives 5 laps total per attempt -- 1 untimed OUT LAP, 3 TIMED LAPS, 1 untimed
 COOLDOWN LAP -- the exact same convention scripts/manual_time_trial.py uses for the physical
@@ -62,8 +67,6 @@ import os
 import time
 from datetime import datetime, timezone
 
-from envs.donkey_env import make_vae_env
-
 
 def _ground_dist(pos_a, pos_b) -> float:
     """Distance in the ground plane only. gym-donkeycar's Unity scenes are Y-up, so "ground
@@ -73,7 +76,7 @@ def _ground_dist(pos_a, pos_b) -> float:
 
 
 def run_one_time_trial(env, model, laps: int = 3, deterministic: bool = True,
-                        lap_departure_m: float = 5.0, lap_return_m: float = 2.0,
+                        lap_departure_m: float = 2.0, lap_return_m: float = 0.1,
                         out_lap: bool = True, cooldown_lap: bool = True):
     """Drives one continuous run: an optional untimed OUT LAP, then `laps` TIMED LAPS, then an
     optional untimed COOLDOWN LAP -- 5 physical laps by default (1 + 3 + 1), matching the same
@@ -172,7 +175,13 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--sim-path", required=True)
     parser.add_argument("--model", required=True)
-    parser.add_argument("--vae-checkpoint", required=True)
+    parser.add_argument("--algo", choices=["sac", "ppo"], default="sac",
+                         help="which algorithm --model was trained with -- sac expects VAE "
+                              "latent observations (needs --vae-checkpoint), ppo expects raw "
+                              "resized camera frames (no --vae-checkpoint). Default sac matches "
+                              "this script's original behavior.")
+    parser.add_argument("--vae-checkpoint", default=None,
+                         help="required when --algo sac; ignored for --algo ppo")
     parser.add_argument("--env-id", default="donkey-waveshare-v0")
     parser.add_argument("--laps", type=int, default=3,
                          help="number of TIMED laps (the out lap and cooldown lap, if enabled, "
@@ -187,7 +196,7 @@ def main():
                          help="skip the untimed cooldown lap -- stop as soon as timing ends")
     parser.add_argument("--attempts", type=int, default=5,
                          help="separate time-trial attempts to run (reports best + mean across them)")
-    parser.add_argument("--max-episode-steps", type=int, default=20000,
+    parser.add_argument("--max-episode-steps", type=int, default=10000,
                          help="step budget for ONE time trial -- must be generous enough for the "
                               "whole attempt, not just --laps: by default that's 5 physical laps "
                               "(1 out + --laps timed + 1 cooldown), not just the timed ones; "
@@ -200,21 +209,46 @@ def main():
     parser.add_argument("--lap-return-m", type=float, default=0.1,
                          help="how close (in info['pos'] units) the car must get back to its "
                               "start point to count as completing a lap")
+    parser.add_argument("--frame-skip", type=int, default=2,
+                         help="how many simulator physics ticks happen per env.step() call -- "
+                              "MUST match whatever the model was actually trained with "
+                              "(configs/sac_vae.yaml's env.frame_skip, which is 2 by default) or "
+                              "the policy will be making decisions at a different cadence than it "
+                              "was trained for. This is purely an environment/evaluation-time "
+                              "setting -- it isn't encoded in the saved model weights, so changing "
+                              "it here never requires retraining, but it must still match the run "
+                              "you're evaluating.")
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--out", default="logs/time_trial.csv",
                          help="CSV file to append every attempt's result to (created if missing)")
     args = parser.parse_args()
 
-    from stable_baselines3 import SAC
+    if args.algo == "sac" and not args.vae_checkpoint:
+        parser.error("--vae-checkpoint is required for --algo sac")
 
-    env = make_vae_env(
-        sim_path=args.sim_path,
-        vae_checkpoint=args.vae_checkpoint,
-        env_id=args.env_id,
-        max_episode_steps=args.max_episode_steps,
-        device=args.device,
-    )
-    model = SAC.load(args.model, device=args.device)
+    if args.algo == "sac":
+        from stable_baselines3 import SAC
+        from envs.donkey_env import make_vae_env
+        model_cls = SAC
+        env = make_vae_env(
+            sim_path=args.sim_path,
+            vae_checkpoint=args.vae_checkpoint,
+            env_id=args.env_id,
+            max_episode_steps=args.max_episode_steps,
+            device=args.device,
+            frame_skip=args.frame_skip,
+        )
+    else:
+        from stable_baselines3 import PPO
+        from envs.donkey_env import make_raw_donkey_env
+        model_cls = PPO
+        env = make_raw_donkey_env(
+            sim_path=args.sim_path,
+            env_id=args.env_id,
+            max_episode_steps=args.max_episode_steps,
+            frame_skip=args.frame_skip,
+        )
+    model = model_cls.load(args.model, device=args.device)
 
     results = []
     for attempt in range(1, args.attempts + 1):
