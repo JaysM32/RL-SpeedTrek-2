@@ -1,4 +1,11 @@
 checkpoints/ppo_waveshare
 checkpoints/sac_intermediate/
-checkpoints/sac_waveshare/
+checkpoints/sac_waveshare_old/
+checkpoints/sac_waveshare_old_v2/
+checkpoints/sac_mixed/
+checkpoints/vae_reconstructions_old_mixed.png
+configs/sac_vae_old.yaml
 data/
+plots/
+logs/
+runs/

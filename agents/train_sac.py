@@ -80,7 +80,7 @@ def main():
     print("[train_sac] environment ready", flush=True)
 
     sac_cfg = cfg["sac"]
-    checkpoint_dir = "checkpoints/sac_waveshare"
+    checkpoint_dir = "checkpoints/sac_mixed"
 
     resume_path = args.resume
     if resume_path == "auto":
