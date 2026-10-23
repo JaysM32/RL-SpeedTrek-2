@@ -1,65 +1,3 @@
-"""Time a trained policy over exactly N laps (default 3) in one continuous run, and report the
-total time -- directly comparable to a human's stopwatch time over the same number of laps.
-
-Works for both SAC (VAE latent observations) and PPO (raw pixel observations) -- pass --algo
-to pick. Defaults to --algo sac to match this script's original behavior, so existing SAC
-commands keep working unchanged.
-
-Usage (SAC):
-    python -m scripts.time_trial --sim-path "/Users/jaysm/Desktop/donkey_sim.app/Contents/MacOS/donkey_sim" --algo sac --model checkpoints/final_models/sac_donkey_250000_steps --vae-checkpoint checkpoints/vae.pt --laps 3 --attempts 5
-
-Usage (PPO -- no --vae-checkpoint, it doesn't use one):
-    python -m scripts.time_trial --sim-path "/Users/jaysm/Desktop/donkey_sim.app/Contents/MacOS/donkey_sim" --algo ppo \
-        --model checkpoints/final_models/ppo_best_model_fast --laps 3 --attempts 5
-
-    # run several attempts and report best + mean, since one attempt can get unlucky:
-    python -m scripts.time_trial --sim-path /path/to/donkey_sim --algo ppo \
-        --model checkpoints/ppo_donkey.zip --laps 3 --attempts 5
-
-    # skip the out/cooldown laps for a quicker sanity-check run:
-    python -m scripts.time_trial --sim-path /path/to/donkey_sim --algo ppo \
-        --model checkpoints/ppo_donkey.zip --no-out-lap --no-cooldown-lap
-
-By default this drives 5 laps total per attempt -- 1 untimed OUT LAP, 3 TIMED LAPS, 1 untimed
-COOLDOWN LAP -- the exact same convention scripts/manual_time_trial.py uses for the physical
-JetRacer, so a sim result and a real-world result are produced the same way and stay directly
-comparable in your report rather than measuring subtly different things. Only the 3 timed laps
-count toward total_time/the CSV; the out and cooldown laps exist purely to match the real-world
-protocol (a car doesn't start from a dead stop already at race pace, and shouldn't be expected
-to brake hard the instant lap 3 ends).
-
-Why not just use scripts/evaluate.py's mean/best single-lap time for the human comparison?
-On a simple track a single lap is noisy -- one lucky or unlucky moment swings the result more
-than it would over a longer run -- and a human time trial is usually timed over a fixed number
-of laps anyway. Summing consecutive individual lap times from one continuous, uninterrupted
-run gives the same kind of number a human's stopwatch time over N laps would.
-
-LAP DETECTION: this does NOT use gym-donkeycar's own info["lap_count"]/info["last_lap_time"].
-On the waveshare track those undercount real laps -- the sim's lap counter only fires on
-`on_collision_with_starting_line`, and only counts a crossing if it hits the exact same
-`starting_line_index` as the very first crossing (see gym_donkeycar/envs/donkey_sim.py).
-That index isn't exposed to Python at all, so if the start/finish trigger on this track is
-built from more than one segment, most physical laps silently don't match and don't count --
-which is exactly the "several real laps = one counted lap, then it runs out of steps" symptom.
-Instead, this tracks the car's own ground position (info["pos"], Unity is Y-up so the ground
-plane is X/Z): once the car has moved at least --lap-departure-m away from its start point
-(so it's genuinely left, not idling near the line), the next time it comes back within
---lap-return-m of that start point counts as one lap, timed with a Python-side stopwatch from
-the previous lap boundary. This is independent of whatever the simulator's own start-line
-trigger geometry happens to be for a given track.
-
-Note: --max-episode-steps defaults much higher than configs/sac_vae.yaml's training value
-(2000, sized for roughly one lap) -- sized for 5 laps (out + 3 timed + cooldown) by default,
-not just --laps, otherwise an attempt would frequently get cut off by the episode step limit
-before finishing, which would look like a crash/DNF when it isn't.
-
-Every attempt is also appended to a CSV (--out, default logs/time_trial.csv) -- one row per
-attempt, with the model checkpoint path, timestamp, per-lap splits, total time, and DNF reason
-if it didn't finish. Console output alone disappears when the terminal closes; this is what
-you'd actually cite a number from in a report, and what lets you compare results across
-different checkpoints later without having to re-run anything.
-"""
-
 import argparse
 import csv
 import math
@@ -69,42 +7,21 @@ from datetime import datetime, timezone
 
 
 def _ground_dist(pos_a, pos_b) -> float:
-    """Distance in the ground plane only. gym-donkeycar's Unity scenes are Y-up, so "ground
-    plane" means X/Z -- Y is height, and a flat oval track shouldn't need it (if your car is
-    somehow airborne this will be wrong, but that's a bigger problem than lap counting)."""
     return math.hypot(pos_a[0] - pos_b[0], pos_a[2] - pos_b[2])
 
 
 def run_one_time_trial(env, model, laps: int = 3, deterministic: bool = True,
                         lap_departure_m: float = 2.0, lap_return_m: float = 0.1,
                         out_lap: bool = True, cooldown_lap: bool = True):
-    """Drives one continuous run: an optional untimed OUT LAP, then `laps` TIMED LAPS, then an
-    optional untimed COOLDOWN LAP -- 5 physical laps by default (1 + 3 + 1), matching the same
-    convention scripts/manual_time_trial.py uses on the real JetRacer. A crash or running out
-    of the step budget during the out lap or the timed laps fails the whole attempt (DNF); a
-    crash/truncation during the cooldown lap does NOT -- the timed portion already succeeded,
-    and real time trials don't retroactively erase your lap times because of what happened
-    after you crossed the final timed line. Doesn't reset the episode partway through, so a
-    slow/cautious lap doesn't invalidate the run, only a real crash or running out of steps does.
-
-    Lap boundaries are detected from the car's own position relative to its start point (see
-    module docstring for why -- the sim's own lap_count is unreliable on this track), not from
-    info["lap_count"]. --lap-departure-m/--lap-return-m are in whatever units info["pos"] uses
-    (meters, for gym-donkeycar); defaults are a starting guess, not a verified value for your
-    track -- the result dict's "max_dist_from_start" tells you how far the car actually got
-    from its start point during the run, which is the quickest way to sanity-check whether
-    these thresholds are in the right ballpark for your oval's actual size.
-    """
     obs, info = env.reset()
     start_pos = info["pos"]
-    sim_lap_count_seen = info.get("lap_count", 0)  # logged only for comparison, see below
+    sim_lap_count_seen = info.get("lap_count", 0)  
     steps = 0
     hit_something = False
     max_dist_from_start = 0.0
 
     def _drive_to_next_lap_boundary():
-        """Drives until the car has left the start area and come back (one lap boundary), or
-        the episode ends first. Returns (lap_time_seconds_or_None, ended_episode: bool)."""
+
         nonlocal obs, steps, max_dist_from_start, sim_lap_count_seen, hit_something
         armed = False
         t0 = time.time()
@@ -115,10 +32,6 @@ def run_one_time_trial(env, model, laps: int = 3, deterministic: bool = True,
 
             sim_lap_count_seen = max(sim_lap_count_seen, info.get("lap_count", 0))
 
-            # Check termination BEFORE the lap-boundary condition: if the car crashes on the
-            # exact same step it also happens to be back near the start point (plausible right
-            # at the start/finish line itself), that's a crash, not a quietly-completed lap --
-            # checking lap-boundary first would mask the crash entirely.
             if terminated or truncated:
                 hit_something = info.get("hit", "none") != "none"
                 return None, True
@@ -151,8 +64,6 @@ def run_one_time_trial(env, model, laps: int = 3, deterministic: bool = True,
 
     finished = len(lap_times) >= laps
 
-    # The timed portion is done -- a cooldown lap is a courtesy, not part of the measurement,
-    # so whatever happens during it doesn't change `finished` or the lap times already recorded.
     cooldown_lap_time = None
     if finished and cooldown_lap:
         cooldown_lap_time, _ended = _drive_to_next_lap_boundary()
@@ -273,10 +184,6 @@ def main():
             phase = "during the out lap" if result["dnf_phase"] == "out_lap" else "during the timed laps"
             print(f"attempt {attempt}: DID NOT FINISH -- {reason} {phase}, after "
                   f"{len(result['lap_times'])}/{args.laps} timed laps")
-        # diagnostic only, not persisted to the CSV -- compares this run's position-based lap
-        # count against the simulator's own (on this track, unreliable) info["lap_count"], and
-        # reports how far the car actually got from its start point so you can tell whether
-        # --lap-departure-m/--lap-return-m are sized sensibly for this track's real scale.
         print(f"    [diagnostic] max distance reached from start point: "
               f"{result['max_dist_from_start']:.2f} (vs. --lap-departure-m={args.lap_departure_m})  "
               f"sim's own info['lap_count'] reached: {result['sim_lap_count_seen']} "

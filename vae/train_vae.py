@@ -1,14 +1,3 @@
-"""Train the VAE on collected frames.
-
-Usage:
-    python -m vae.train_vae --data data/frames --out checkpoints/vae.pt --latent-dim 32
-
-Writes checkpoints/vae_reconstructions.png at the end so you can eyeball reconstruction
-quality -- this is the single most useful debugging signal for this stage. If reconstructions
-are unrecognizable noise, check that your frames actually contain varied, in-focus track
-views before assuming the model architecture is the problem.
-"""
-
 import argparse
 import glob
 import os

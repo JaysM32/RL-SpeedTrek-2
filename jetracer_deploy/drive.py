@@ -1,23 +1,3 @@
-#!/usr/bin/env python3
-"""Run ON THE JETRACER. Drives the car with the VAE + SAC policy exported by export_to_jetracer.py.
-
-Written for the car's software: Python 3.6, torch 1.6 (CUDA), OpenCV 4.1, numpy, and the
-`jetracer` package. Does NOT need Stable-Baselines3.
-
-Pipeline (identical to training in envs/donkey_env.py):
-    camera frame (BGR) -> RGB -> resize whole frame to 160x80 -> /255 -> CHW
-      -> VAE encoder mean (32 numbers) -> SAC actor -> tanh -> scale to action space
-      -> [steering in -1..1, throttle in 0..1] -> throttle capped by --max-throttle -> motors
-
-Modes, safest first -- do them in this order:
-    python3 drive.py --selftest            no camera, no motors: checks the maths matches SB3
-    python3 drive.py --check               camera only: saves what the VAE sees, times inference
-    python3 drive.py --dry-run             camera + policy, prints actions, motors never touched
-    python3 drive.py --max-throttle 0.15   actually drives (wheels off the ground first!)
-
-Stop at any time with Ctrl+C -- throttle and steering are zeroed on every exit path.
-"""
-
 from __future__ import print_function
 
 import argparse
@@ -29,10 +9,8 @@ import time
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-IMG_H, IMG_W = 80, 160  # configs/sac_vae.yaml env.image_size
+IMG_H, IMG_W = 80, 160 
 
-
-# --------------------------------------------------------------------------- model
 class Policy(object):
     def __init__(self, path, device="auto"):
         import torch
@@ -70,7 +48,7 @@ class Policy(object):
             self.dec_fc.to(self.device).eval()
             self.dec.to(self.device).eval()
 
-        # SAC actor in plain numpy (tiny MLP, faster than a GPU round-trip)
+
         self.layers = []
         i = 0
         while "actor_l%d_w" % i in w.files:
@@ -91,7 +69,7 @@ class Policy(object):
         import cv2
         rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
         rgb = cv2.resize(rgb, (IMG_W, IMG_H), interpolation=cv2.INTER_AREA)
-        return rgb  # uint8 HxWx3, exactly what the sim gave the VAE wrapper
+        return rgb  
 
     def encode(self, rgb_u8):
         x = rgb_u8.astype(np.float32) / 255.0
@@ -116,10 +94,8 @@ class Policy(object):
         return self.low + 0.5 * (a + 1.0) * (self.high - self.low)
 
 
-# --------------------------------------------------------------------------- camera
 def gst_pipeline(cap_w, cap_h, fps, out_w, out_h, flip):
-    return ("nvarguscamerasrc sensor-id=0 ! "
-            "video/x-raw(memory:NVMM), width=%d, height=%d, framerate=%d/1 ! "
+    return ("width=%d, height=%d, framerate=%d/1 ! "
             "nvvidconv flip-method=%d ! video/x-raw, width=%d, height=%d, format=BGRx ! "
             "videoconvert ! video/x-raw, format=BGR ! appsink drop=true max-buffers=1 sync=false"
             % (cap_w, cap_h, fps, flip, out_w, out_h))
@@ -129,13 +105,12 @@ class Camera(object):
     def __init__(self, flip=0):
         import cv2
         self.cv2 = cv2
-        # Sensor is 3264x2464 (4:3); 1640x1232 is its full-FOV binned mode. nvvidconv shrinks
-        # on the GPU so the CPU only ever sees a small frame.
+
         self.cap = cv2.VideoCapture(gst_pipeline(1640, 1232, 30, 320, 240, flip), cv2.CAP_GSTREAMER)
         if not self.cap.isOpened():
             raise RuntimeError("Could not open CSI camera. Try: sudo systemctl restart nvargus-daemon "
                                "(and make sure no notebook is holding the camera)")
-        for _ in range(5):  # let auto-exposure settle
+        for _ in range(5):  
             self.cap.read()
 
     def read(self):
@@ -146,7 +121,6 @@ class Camera(object):
         self.cap.release()
 
 
-# --------------------------------------------------------------------------- modes
 def selftest(policy):
     print("device for VAE encoder:", policy.device)
     if policy.ref is None:
@@ -191,8 +165,6 @@ def check(policy, cam, n=5):
         cv2.imwrite(os.path.join(out_dir, "frame_%d.png" % i), big)
         time.sleep(0.5)
     print("saved to %s  (left: what the VAE gets, right: its reconstruction)" % out_dir)
-    print("If the right side looks nothing like a track, the VAE doesn't recognise the real "
-          "scene -- expect poor driving until it's fine-tuned on real frames.")
 
 
 def drive(policy, cam, args):
@@ -228,7 +200,7 @@ def drive(policy, cam, args):
                 break
             frame = cam.read()
             if frame is None:
-                if time.time() - last_frame_t > 0.3:  # watchdog: no picture -> stop
+                if time.time() - last_frame_t > 0.3: 
                     print("camera stalled for >0.3 s -- stopping")
                     break
                 if car:
@@ -273,22 +245,16 @@ def main():
     p.add_argument("--selftest", action="store_true")
     p.add_argument("--check", action="store_true")
     p.add_argument("--dry-run", action="store_true")
-    p.add_argument("--max-throttle", type=float, default=0.15,
-                   help="policy throttle (0..1) is multiplied by this. Start low.")
-    p.add_argument("--hz", type=float, default=20.0, help="control loop rate cap")
-    p.add_argument("--duration", type=float, default=0, help="auto-stop after N seconds (0 = off)")
-    p.add_argument("--steering-gain", type=float, default=None, help="override car.steering_gain")
-    p.add_argument("--steering-offset", type=float, default=None, help="override car.steering_offset")
+    p.add_argument("--max-throttle", type=float, default=0.15)
+    p.add_argument("--hz", type=float, default=20.0)
+    p.add_argument("--duration", type=float, default=0)
+    p.add_argument("--steering-gain", type=float, default=None)
+    p.add_argument("--steering-offset", type=float, default=None)
     p.add_argument("--invert-steering", action="store_true")
-    p.add_argument("--reverse-throttle", action="store_true",
-                   help="use if positive throttle drives the car backwards")
-    p.add_argument("--flip", type=int, default=0, help="camera flip-method (2 = rotate 180)")
+    p.add_argument("--reverse-throttle", action="store_true",)
+    p.add_argument("--flip", type=int, default=0, )
     p.add_argument("--device", default="auto")
     args = p.parse_args()
-
-    if args.max_throttle > 0.5:
-        print("refusing --max-throttle > 0.5 for safety; edit the script if you really mean it")
-        sys.exit(1)
 
     policy = Policy(args.model, args.device)
     if args.selftest:

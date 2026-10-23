@@ -86,3 +86,13 @@ timestamp,model,env_id,laps_target,attempt,finished,total_time,dnf_reason,steps,
 2026-10-21T22:18:33+00:00,checkpoints/sac_mixed/sac_donkey_250000_steps.zip,donkey-waveshare-v0,3,3,True,10.594,,186,3.500,3.606,3.488
 2026-10-21T22:18:33+00:00,checkpoints/sac_mixed/sac_donkey_250000_steps.zip,donkey-waveshare-v0,3,4,True,10.345,,186,3.505,3.290,3.551
 2026-10-21T22:18:33+00:00,checkpoints/sac_mixed/sac_donkey_250000_steps.zip,donkey-waveshare-v0,3,5,True,10.197,,180,3.484,3.411,3.302
+2026-10-22T11:50:32+00:00,checkpoints/final_models/sac_mixed_250000,donkey-waveshare-v0,3,1,True,13.597,,251,6.789,3.407,3.400
+2026-10-22T11:50:32+00:00,checkpoints/final_models/sac_mixed_250000,donkey-waveshare-v0,3,2,True,16.987,,288,3.487,3.407,10.093
+2026-10-22T11:50:32+00:00,checkpoints/final_models/sac_mixed_250000,donkey-waveshare-v0,3,3,True,10.605,,184,3.601,3.501,3.503
+2026-10-22T11:50:32+00:00,checkpoints/final_models/sac_mixed_250000,donkey-waveshare-v0,3,4,True,10.112,,182,3.409,3.394,3.309
+2026-10-22T11:50:32+00:00,checkpoints/final_models/sac_mixed_250000,donkey-waveshare-v0,3,5,True,10.190,,180,3.298,3.396,3.496
+2026-10-22T11:54:00+00:00,checkpoints/final_models/ppo_best_model_fast,donkey-waveshare-v0,3,1,True,18.594,,302,5.901,6.994,5.700
+2026-10-22T11:54:00+00:00,checkpoints/final_models/ppo_best_model_fast,donkey-waveshare-v0,3,2,True,18.194,,304,5.795,6.307,6.092
+2026-10-22T11:54:00+00:00,checkpoints/final_models/ppo_best_model_fast,donkey-waveshare-v0,3,3,True,16.408,,290,5.308,5.599,5.501
+2026-10-22T11:54:00+00:00,checkpoints/final_models/ppo_best_model_fast,donkey-waveshare-v0,3,4,True,17.501,,301,6.401,5.708,5.391
+2026-10-22T11:54:00+00:00,checkpoints/final_models/ppo_best_model_fast,donkey-waveshare-v0,3,5,True,16.993,,302,5.287,5.504,6.203

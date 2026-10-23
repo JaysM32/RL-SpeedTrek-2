@@ -1,21 +1,3 @@
-"""Train SAC on top of VAE latent observations. This is the main training script.
-
-Usage:
-    python -m agents.train_sac --sim-path /path/to/donkey_sim --vae-checkpoint checkpoints/vae.pt \
-        --config configs/sac_vae.yaml
-
-    # to resume the most recent checkpoint instead of starting over:
-    python -m agents.train_sac --sim-path /path/to/donkey_sim --vae-checkpoint checkpoints/vae.pt \
-        --config configs/sac_vae.yaml --resume auto
-
-Requires a VAE checkpoint from vae/train_vae.py -- train that first.
-
-IMPORTANT: by default this always starts a brand-new model from scratch, even if
-checkpoints already exist in checkpoints/sac_intermediate/ -- it does not auto-resume.
-Pass --resume auto (pick up the latest checkpoint) or --resume <path-to-checkpoint.zip>
-(a specific one) if you want to continue an interrupted run instead of losing that progress.
-"""
-
 import argparse
 import glob
 import os
@@ -31,8 +13,6 @@ from utils.reward import RewardConfig
 
 
 def _find_latest_checkpoint(save_dir: str, name_prefix: str) -> str | None:
-    """Finds the highest-timestep checkpoint written by CheckpointCallback, e.g.
-    checkpoints/sac_intermediate/sac_donkey_40000_steps.zip -> picks 40000 over 30000."""
     pattern = os.path.join(save_dir, f"{name_prefix}_*_steps.zip")
     candidates = glob.glob(pattern)
     if not candidates:
@@ -53,8 +33,6 @@ def main():
     parser.add_argument(
         "--resume",
         default=None,
-        help="'auto' to resume the latest checkpoint in checkpoints/sac_intermediate/, "
-        "or a specific checkpoint .zip path. Omit to always start fresh (the old default behavior).",
     )
     args = parser.parse_args()
 
@@ -119,9 +97,6 @@ def main():
     )
     stats_cb = EpisodeStatsCallback()
 
-    # reset_num_timesteps=False is what makes a resumed run keep counting from where the
-    # loaded checkpoint left off, instead of resetting the step counter (and learning_starts
-    # warm-up) back to zero.
     model.learn(
         total_timesteps=sac_cfg["total_timesteps"],
         callback=[checkpoint_cb, stats_cb],

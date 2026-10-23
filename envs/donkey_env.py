@@ -1,17 +1,3 @@
-"""gym-donkeycar environment wrapper.
-
-Provides:
-  - make_raw_donkey_env(...)   raw sim env, image observations, our reward shaping applied
-  - make_vae_env(...)          same, but observations are VAE latent vectors (for SAC)
-  - a CLI smoke test:  python -m envs.donkey_env --sim-path /path/to/donkey_sim --steps 200
-
-gym-donkeycar's exact API (old-style `gym` 4-tuple step vs. `gymnasium` 5-tuple, and
-reset() returning `obs` vs `(obs, info)`) has varied across versions. The small `_compat_*`
-helpers below normalize both to the gymnasium 5-tuple/`(obs, info)` convention so the rest
-of this codebase doesn't need to care which one you have installed. If your installed
-version differs enough to break this, the fix is almost always in these two helpers.
-"""
-
 import argparse
 import math
 import uuid
@@ -42,10 +28,6 @@ def _compat_step(env, action):
 
 
 def _ground_dist(pos_a, pos_b) -> float:
-    """Distance in the ground plane only. gym-donkeycar's Unity scenes are Y-up, so "ground
-    plane" means X/Z -- Y is height. Same helper as scripts/time_trial.py's _ground_dist,
-    duplicated rather than imported so envs/ doesn't depend on scripts/ -- keep the two in
-    sync if either changes."""
     return math.hypot(pos_a[0] - pos_b[0], pos_a[2] - pos_b[2])
 
 
@@ -63,49 +45,13 @@ def _make_sim_conf(sim_path: str, host: str, port: int, frame_skip: int = 1, cam
         "country": "AU",
         "bio": "training",
         "guid": str(uuid.uuid4()),
-        # This is the SIMULATOR's own built-in game-over threshold (donkey_sim.py checks
-        # abs(cte) > this itself and sets `done`), separate from RewardConfig.max_cte, which
-        # is our own Python-side check in compute_reward(). They used to be two independently
-        # hardcoded numbers (8 here vs. whatever was in configs/sac_vae.yaml) -- now this one
-        # is derived from RewardConfig.max_cte by make_raw_donkey_env() below, so there's only
-        # one number to tune instead of two silently-different ones.
         "max_cte": max_cte,
-        # gym-donkeycar reads these two straight off the conf dict (see supply_defaults()
-        # in its donkey_env.py) -- without setting them here they silently fall back to
-        # frame_skip=1 and cam_resolution=(120,160,3), no matter what configs/sac_vae.yaml says.
         "frame_skip": frame_skip,
         "cam_resolution": cam_resolution,
     }
 
 
 class RewardShapingWrapper(RewardWrapper):
-    """Replaces the sim's default reward with utils.reward.compute_reward, and ends the
-    episode on crash/off-track (gym-donkeycar's own `done` signal is sometimes lenient).
-
-    LAP DETECTION: this does NOT use gym-donkeycar's own info["lap_count"]/info["last_lap_time"]
-    -- the exact same reason scripts/time_trial.py doesn't: on the waveshare track, the sim's
-    own lap counter only fires on `on_collision_with_starting_line`, and only counts a crossing
-    that matches the exact `starting_line_index` recorded on the very first crossing (see
-    gym_donkeycar/envs/donkey_sim.py). That index isn't exposed to Python, and on this track
-    most real crossings don't match it, so `info["lap_count"]` silently undercounts -- which
-    meant the "fast" mode's lap-time reward bonus below was rarely firing during training at
-    all, not just being occasionally wrong.
-
-    Instead, lap boundaries are detected the same way time_trial.py does it: once the car has
-    moved at least `reward_cfg.lap_departure_m` away from its reset() position (so it's
-    genuinely left, not idling near the line), the next time it comes back within
-    `reward_cfg.lap_return_m` of that position counts as one lap. Lap "time" is measured in
-    STEPS, not wall-clock seconds -- training-loop overhead (gradient updates, inference
-    latency between env.step() calls) would otherwise leak into a wall-clock measurement and
-    reward the agent for things that have nothing to do with how it drove. See
-    RewardConfig.lap_steps_bonus_scale's docstring for the same point from the reward side.
-
-    The reliable lap count/last-lap-step-count are surfaced as info["lap_count_reliable"] and
-    info["last_lap_steps"] -- utils/callbacks.py's EpisodeStatsCallback reads those, not the
-    sim's own (unreliable) info["lap_count"]/info["last_lap_time"], which are left untouched
-    in `info` for comparison/debugging if you want to look at them.
-    """
-
     def __init__(self, env, reward_cfg: RewardConfig | None = None):
         super().__init__(env)
         self.reward_cfg = reward_cfg or RewardConfig()
@@ -122,10 +68,6 @@ class RewardShapingWrapper(RewardWrapper):
 
         cte = float(info.get("cte", 0.0))
         hit = info.get("hit", "none")
-        # Needed up front: a crash can coincide with the car being back near the start point
-        # (plausible -- that's on the track too), and that must not get credited as a
-        # completed lap. Same ordering bug class already found and fixed in
-        # scripts/time_trial.py's _drive_to_next_lap_boundary().
         will_crash = (hit != "none") or (abs(cte) > self.reward_cfg.max_cte)
 
         just_completed_lap = False
@@ -133,9 +75,6 @@ class RewardShapingWrapper(RewardWrapper):
         pos = info.get("pos")
         if pos is not None:
             if self._start_pos is None:
-                # Shouldn't normally happen (reset() always sets this first), but don't crash
-                # training over a missing position on some weird first frame -- just arm from
-                # here instead of lap-detecting against nothing.
                 self._start_pos = pos
             self._steps_since_boundary += 1
             dist_to_start = _ground_dist(pos, self._start_pos)
@@ -167,12 +106,11 @@ class RewardShapingWrapper(RewardWrapper):
         info["last_lap_steps"] = 0
         return obs, info
 
-    def reward(self, reward):  # required by RewardWrapper's abstract interface; unused
+    def reward(self, reward): 
         return reward
 
 
 class ResizeObservation(ObservationWrapper):
-    """Resizes raw camera frames to a consistent size before anything downstream sees them."""
 
     def __init__(self, env, size=(80, 160)):
         super().__init__(env)
@@ -184,8 +122,6 @@ class ResizeObservation(ObservationWrapper):
 
 
 class VAELatentObservationWrapper(ObservationWrapper):
-    """Replaces image observations with the VAE's latent mean vector -- this is the
-    observation SAC actually trains on. Loads a checkpoint produced by vae/train_vae.py."""
 
     def __init__(self, env, vae_checkpoint: str, device: str = "cpu"):
         super().__init__(env)
@@ -220,18 +156,8 @@ def make_raw_donkey_env(
     reward_cfg: RewardConfig | None = None,
     frame_skip: int = 1,
 ) -> Env:
-    """Raw env with resized image observations and our reward shaping -- what you'd use
-    for frame collection or the PPO+CNN baseline."""
-    import gym_donkeycar  # noqa: F401  (registers the donkey-* env ids on import)
+    import gym_donkeycar 
     import gymnasium as gym
-
-    # Tell Unity to render/send frames at our target size directly, instead of sending
-    # 120x160 (the sim's own default) and throwing pixels away in ResizeObservation --
-    # smaller frames over the socket is a real wall-clock speedup, not just a sample-
-    # efficiency one.
-    #
-    # The sim's own game-over threshold is derived from reward_cfg.max_cte so it's the same
-    # number you tune in configs/sac_vae.yaml, not a second hardcoded one living here.
     sim_max_cte = reward_cfg.max_cte if reward_cfg is not None else 8.0
     conf = _make_sim_conf(sim_path, host, port, frame_skip=frame_skip, cam_resolution=(*image_size, 3),
                            max_cte=sim_max_cte)

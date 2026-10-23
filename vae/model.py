@@ -1,13 +1,3 @@
-"""A small convolutional VAE for compressing DonkeyCar camera frames.
-
-Input: RGB image, default 80x160x3 (H x W x C), normalized to [0, 1].
-Output: reconstruction of the same shape, plus (mu, logvar) for the latent distribution.
-
-Kept deliberately small -- the point of this whole approach is that the encoder is cheap
-enough to run every frame on a Jetson. Grow `latent_dim` or the conv channels only if you've
-confirmed reconstructions are the bottleneck, not the RL side.
-"""
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -76,8 +66,6 @@ class VAE(nn.Module):
         return recon, mu, logvar
 
     def encode_mean(self, x: torch.Tensor) -> torch.Tensor:
-        """Deterministic encoding (mean of q(z|x)) -- use this at inference/RL time,
-        not a sampled z, so the RL agent sees a stable observation."""
         mu, _ = self.encoder(x)
         return mu
 

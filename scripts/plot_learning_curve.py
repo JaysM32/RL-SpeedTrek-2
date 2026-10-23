@@ -1,40 +1,3 @@
-"""Export TensorBoard scalars (SAC/PPO training curves) to a PNG plot for your report.
-
-Usage:
-    python -m scripts.plot_learning_curve --logdir runs/sac_vae --out plots/learning_curve.png
-
-    # plot several tags on one chart, e.g. mean episode reward and mean episode length:
-    python -m scripts.plot_learning_curve --logdir runs/sac_vae \
-        --tags rollout/ep_rew_mean rollout/ep_len_mean --out plots/reward_and_length.png
-
-    # smooth a noisy curve with a rolling average over 20 data points:
-    python -m scripts.plot_learning_curve --logdir runs/sac_vae --smooth 20
-
-    # mark where a curriculum phase changed with a dotted vertical line + label:
-    python -m scripts.plot_learning_curve --logdir runs/sac_vae --smooth 20 \
-        --vline 150000 --vline-label "safe -> fast"
-
-    # several markers at once (labels are matched to --vline by position):
-    python -m scripts.plot_learning_curve --logdir runs/sac_vae \
-        --vline 150000 300000 --vline-label "safe -> fast" "waveshare switch"
-
-    # see every tag that's actually been logged, if you're not sure what to plot:
-    python -m scripts.plot_learning_curve --logdir runs/sac_vae --list-tags
-
-Walks every events.out.tfevents.* file found anywhere under --logdir. SB3 creates a new
-subfolder each time training starts fresh, and a `--resume` run continues writing into an
-existing one -- so after several resumes (phase 1 "safe" mode, phase 2 "fast" mode, etc.)
-there's usually more than one event file, and this script merges all of them by step so you
-get one continuous curve rather than having to hunt down the right subfolder yourself.
-
-Useful tags SB3 and this project's EpisodeStatsCallback already log, without any extra setup:
-    rollout/ep_rew_mean   -- SB3's own rolling average reward over the last 100 episodes
-    rollout/ep_len_mean   -- same, for episode length
-    rollout/ep_rew        -- this project's own per-episode (non-averaged) reward
-    rollout/ep_len        -- same, per-episode length
-    train/actor_loss, train/critic_loss, train/ent_coef  -- SAC's internal training losses
-"""
-
 import argparse
 import os
 
@@ -54,7 +17,6 @@ def _find_event_files(logdir):
 
 
 def _load_tag(event_files, tag):
-    """Returns (steps, values), sorted by step, merged across every event file that has `tag`."""
     points = []
     for path in event_files:
         ea = EventAccumulator(path, size_guidance={"scalars": 0})  # 0 = no cap, load everything
@@ -92,19 +54,13 @@ def _smooth(values, window):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--logdir", default="runs/sac_vae")
-    parser.add_argument("--tags", nargs="+", default=["rollout/ep_rew_mean"],
-                         help="TensorBoard scalar tags to plot together on one chart")
+    parser.add_argument("--tags", nargs="+", default=["rollout/ep_rew_mean"])
     parser.add_argument("--out", default="plots/learning_curve.png")
-    parser.add_argument("--smooth", type=int, default=1,
-                         help="rolling-average window in data points; 1 = no smoothing")
-    parser.add_argument("--list-tags", action="store_true",
-                         help="print every scalar tag found under --logdir and exit, instead of plotting")
-    parser.add_argument("--vline", type=float, nargs="+", default=[],
-                         help="training timestep(s) to mark with a vertical dotted line, e.g. "
-                              "where a curriculum phase (safe -> fast) or a config change happened")
-    parser.add_argument("--vline-label", nargs="+", default=[],
-                         help="label(s) for --vline, matched by position; fine to give fewer "
-                              "labels than --vline values, the rest are left unlabeled")
+    parser.add_argument("--smooth", type=int, default=1)
+    parser.add_argument("--list-tags", action="store_true")
+    parser.add_argument("--vline", type=float, nargs="+", default=[])
+    parser.add_argument("--vline-label", nargs="+", default=[])
+    parser.add_argument("--title", default=None)
     args = parser.parse_args()
 
     if len(args.vline_label) > len(args.vline):
@@ -125,7 +81,7 @@ def main():
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
 
     fig, ax = plt.subplots(figsize=(9, 5))
-    plotted_tags = []  # tags that actually had data -- may be fewer than args.tags requested
+    plotted_tags = []  
     for tag in args.tags:
         steps, values = _load_tag(event_files, tag)
         if not steps:
@@ -148,13 +104,10 @@ def main():
                     fontsize=8, color="dimgray", transform=ax.get_xaxis_transform(),
                     clip_on=False)
 
-    # Title (and y-axis label, when there's only one series) say which tag(s) produced this
-    # chart -- "Training curve" alone was ambiguous once you're comparing several PNGs side by
-    # side in a report and can't tell rollout/ep_rew_mean from rollout/ep_len_mean at a glance.
     tag_summary = ", ".join(plotted_tags)
     ax.set_xlabel("training timestep")
     ax.set_ylabel(plotted_tags[0] if len(plotted_tags) == 1 else "value")
-    ax.set_title(f"Training curve: {tag_summary}")
+    ax.set_title(args.title if args.title else f"Training curve: {tag_summary}")
     ax.legend()
     ax.grid(alpha=0.3)
     fig.tight_layout()

@@ -1,24 +1,3 @@
-"""Run on your Mac (in the same Python env you trained with).
-
-Converts the trained SAC policy + VAE into one plain-numpy file, `jetracer_policy.npz`,
-that the car can load without Stable-Baselines3 and without caring which PyTorch
-version wrote it (the car has Python 3.6 / torch 1.6; your Mac has torch 2.x / SB3 2.x).
-
-Usage (from the donkey-rl-scaffold folder):
-    python scripts/export_to_jetracer.py \
-        --sac checkpoints/final_models/sac_donkey_250000_steps.zip \
-        --vae checkpoints/final_models/vae.pt \
-        --out jetracer_policy.npz
-
-What goes in the file:
-  - VAE encoder conv + fc_mu weights   (fc_logvar is dropped: only the mean is used)
-  - VAE decoder weights                (only used by drive.py --check, to show what the
-                                        VAE "sees" in a real camera frame)
-  - SAC actor: latent_pi MLP + mu head (critics, log_std, optimisers, replay buffer dropped)
-  - action-space low/high              (to undo SB3's [-1,1] squashing exactly as predict() does)
-  - a reference latent/action pair     (drive.py --selftest checks the car reproduces it)
-"""
-
 import argparse
 import io
 import json
@@ -54,7 +33,6 @@ def main():
     out["act_low"] = parse_vec(data["action_space"]["low"])
     out["act_high"] = parse_vec(data["action_space"]["high"])
 
-    # ---- VAE ----
     ck = torch.load(args.vae, map_location="cpu")
     vsd = ck["state_dict"]
     out["latent_dim"] = np.array(ck["latent_dim"])
@@ -63,7 +41,6 @@ def main():
             continue
         out["vae." + k] = v.numpy()
 
-    # ---- reference pair for the on-car self-test, computed with SB3 itself ----
     rng = np.random.RandomState(0)
     ref_latent = rng.randn(4, int(ck["latent_dim"])).astype(np.float32)
     try:
@@ -73,7 +50,7 @@ def main():
         out["ref_latent"] = ref_latent
         out["ref_action"] = ref_action.astype(np.float32)
         print("reference actions from SB3:\n", ref_action)
-    except Exception as e:  # SB3 missing -> skip, the car will just skip the self-test
+    except Exception as e:  
         print("WARNING: could not load with SB3 for the self-test reference (%s)" % e)
 
     np.savez(args.out, **out)

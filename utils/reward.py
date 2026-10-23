@@ -12,25 +12,7 @@ class RewardConfig:
     max_cte: float = 4.0
     safe_speed_cap: float = 1.0
     lap_complete_bonus: float = 20.0
-    # Scales the "fast" mode speed-of-lap bonus: reward += lap_steps_bonus_scale / lap_steps
-    # on the step a lap is completed. This used to be lap_time_bonus_scale / last_lap_time
-    # (wall-clock seconds, read from gym-donkeycar's own info["last_lap_time"]) -- changed to
-    # steps for two reasons: (1) info["last_lap_time"] only ever got populated when the sim's
-    # own on_collision_with_starting_line() recognized the crossing, which on the waveshare
-    # track silently fails most of the time (see envs/donkey_env.py's RewardShapingWrapper
-    # docstring) -- the bonus was rarely firing at all; (2) even when it did fire, wall-clock
-    # seconds measured during training are contaminated by however long gradient updates/model
-    # inference took between env.step() calls, which has nothing to do with how fast the car
-    # actually drove. Step count isn't contaminated by that and is what "fast" mode should
-    # actually be minimizing. Default is a rough starting point, not tuned against a real run
-    # -- watch rollout/lap_steps in TensorBoard once you have real episodes and adjust so this
-    # bonus is a meaningful (but not dominant) fraction of a typical episode's total reward.
     lap_steps_bonus_scale: float = 5000.0
-    # Position-based lap-boundary detection (see RewardShapingWrapper): how far (in
-    # info["pos"] units, meters) the car must get from its reset() position before a return
-    # counts as a lap, and how close it must come back. Same defaults as
-    # scripts/time_trial.py's --lap-departure-m/--lap-return-m, deliberately -- keeping them
-    # equal means training and evaluation agree on what a "lap" is on this track.
     lap_departure_m: float = 5.0
     lap_return_m: float = 2.0
 

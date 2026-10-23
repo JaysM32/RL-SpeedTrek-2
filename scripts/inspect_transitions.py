@@ -1,22 +1,3 @@
-"""Step through the env and print/save the actual state, action, and reward at every step --
-useful for sanity-checking that the reward function and VAE latent state look reasonable,
-and for screenshots/plots in your assignment writeup.
-
-Usage:
-    # random actions, prints live and saves a CSV
-    python -m scripts.inspect_transitions --sim-path /path/to/donkey_sim \
-        --vae-checkpoint checkpoints/vae.pt --steps 300
-
-    # drive with a trained policy instead of random actions
-    python -m scripts.inspect_transitions --sim-path /path/to/donkey_sim \
-        --vae-checkpoint checkpoints/vae.pt --policy checkpoints/sac_donkey.zip --steps 300
-
-"state" here means the VAE latent vector (32 numbers by default) -- that's what SAC actually
-sees and trains on, not the raw image. The 32 numbers on their own aren't human-readable, so
-this also prints/saves cte and speed from `info` alongside them so you can sanity-check the
-state against something you can interpret (e.g. "state changed a lot right as cte spiked").
-"""
-
 import argparse
 import csv
 

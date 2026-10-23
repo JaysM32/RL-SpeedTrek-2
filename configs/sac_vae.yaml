@@ -1,15 +1,9 @@
-# Config for SAC-in-VAE-latent-space training, and the PPO-on-raw-pixels comparison baseline.
-# env: and reward: are shared by both algorithms -- edit them once and both train.py scripts
-# pick up the same track, reward curriculum, and crash threshold. sac: and ppo: hold each
-# algorithm's own hyperparameters and output paths.
-# Copy this file if you want to keep multiple experiment configs around.
-
 env:
   sim_path: "/Users/jaysm/Desktop/donkey_sim.app/Contents/MacOS/donkey_sim"     # path to the Unity simulator executable
-  env_id: "donkey-waveshare-v0"  # see gym-donkeycar for other track ids
+  env_id: "donkey-waveshare-v0"  
   host: "127.0.0.1"
   port: 9091
-  image_size: [80, 160, 3]             # [H, W, C] after resize, before VAE encoding
+  image_size: [80, 160, 3]            
   frame_skip: 2
   max_episode_steps: 2000
 
@@ -18,19 +12,18 @@ vae:
   checkpoint: "checkpoints/vae_mixed.pt"
 
 reward:
-  mode: "fast"                         # "safe" (phase 1: finish laps, speed doesn't matter) or
-                                        # "fast" (phase 2: optimize for lap time) -- see utils/reward.py
+  mode: "fast"                        
+                                        
   progress_weight: 1.0
   cross_track_weight: -1.0
   crash_penalty: -10.0
-  min_speed_penalty: -0.5              # discourage the "drive slowly to avoid risk" degenerate policy ("safe" mode only)
-  max_cte: 1.5                         # loosened from the code default (4.0) so minor wobbles don't end the episode
-  safe_speed_cap: 1.0                  # "safe" mode only: progress reward caps out at this speed
-  lap_complete_bonus: 20.0             # flat bonus for finishing a lap, in either mode
-  lap_steps_bonus_scale: 5000.0        # "fast" mode only: bonus = this / lap_steps (fewer steps/lap = bigger bonus)
-  lap_departure_m: 2.0                 # how far (meters) the car must get from its reset() position before
-                                        # a return counts as a lap -- see envs/donkey_env.py's RewardShapingWrapper
-  lap_return_m: 0.1                    # how close (meters) it must come back to count as completing that lap
+  min_speed_penalty: -0.5              
+  max_cte: 1.5                         
+  safe_speed_cap: 1.0                 
+  lap_complete_bonus: 20.0            
+  lap_steps_bonus_scale: 5000.0        
+  lap_departure_m: 2.0                 
+  lap_return_m: 0.1                   
 
 sac:
   total_timesteps: 100000
@@ -49,9 +42,6 @@ sac:
   save_every_steps: 5000
 
 ppo:
-  # total_timesteps matches sac.total_timesteps on purpose -- same number of environment
-  # steps for both, so a reward-vs-timesteps comparison in your report isn't confounded by
-  # one algorithm simply having trained longer than the other.
   total_timesteps: 100000
   learning_rate: 0.0003
   n_steps: 2048

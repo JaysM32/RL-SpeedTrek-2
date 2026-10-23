@@ -1,10 +1,3 @@
-"""Run evaluation episodes for a trained SAC (VAE-latent) policy and report summary stats.
-
-Usage:
-    python -m scripts.evaluate --sim-path /path/to/donkey_sim --model checkpoints/sac_donkey.zip \
-        --vae-checkpoint checkpoints/vae.pt --episodes 10
-"""
-
 import argparse
 
 import numpy as np
